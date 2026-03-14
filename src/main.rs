@@ -32,7 +32,7 @@ enum Availability {
 
 const ALL_TLDS: &[&str] = &[
     "com", "net", "org", "io", "dev", "app", "co", "ai", "me",
-    "sh", "gg", "cc", "cv", "xyz",
+    "gg", "cc", "cv", "xyz",
 ];
 
 fn rdap_url(name: &str, tld: &str) -> String {
@@ -45,7 +45,6 @@ fn rdap_url(name: &str, tld: &str) -> String {
         "app"      => format!("https://pubapi.registry.google/rdap/domain/{}.{}", name, tld),
         "ai"       => format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld),
         "me"       => format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld),
-        "sh"       => format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld),
         "cc"       => format!("https://tld-rdap.verisign.com/cc/v1/domain/{}.{}", name, tld),
         "xyz"      => format!("https://rdap.centralnic.com/xyz/domain/{}.{}", name, tld),
         "cv"       => format!("https://rdap.nic.cv/domain/{}.{}", name, tld),
