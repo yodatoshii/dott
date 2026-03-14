@@ -32,7 +32,7 @@ enum Availability {
 
 const ALL_TLDS: &[&str] = &[
     "com", "net", "org", "io", "dev", "app", "co", "ai", "me",
-    "sh", "gg", "cc", "cv", "xyz", "designer",
+    "sh", "gg", "cc", "cv", "xyz",
 ];
 
 fn rdap_url(name: &str, tld: &str) -> String {
@@ -49,7 +49,6 @@ fn rdap_url(name: &str, tld: &str) -> String {
         "cc"       => format!("https://tld-rdap.verisign.com/cc/v1/domain/{}.{}", name, tld),
         "xyz"      => format!("https://rdap.centralnic.com/xyz/domain/{}.{}", name, tld),
         "cv"       => format!("https://rdap.nic.cv/domain/{}.{}", name, tld),
-        "designer" => format!("https://rdap.centralnic.com/designer/domain/{}.{}", name, tld),
         _          => format!("https://rdap.org/domain/{}.{}", name, tld),
     }
 }
@@ -60,7 +59,6 @@ fn whois_server(tld: &str) -> Option<&'static str> {
         "cc"       => Some("whois.nic.cc"),
         "xyz"      => Some("whois.nic.xyz"),
         "gg"       => Some("whois.gg"),
-        "designer" => Some("whois.centralnic.com"),
         "com"      => Some("whois.verisign-grs.com"),
         "net"      => Some("whois.verisign-grs.com"),
         "org"      => Some("whois.pir.org"),
