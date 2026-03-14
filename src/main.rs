@@ -26,29 +26,31 @@ struct Cli {
 #[derive(Debug, Clone)]
 enum Availability {
     Available,
+    Protected,
     Taken,
     Unknown,
 }
 
 const ALL_TLDS: &[&str] = &[
     "com", "net", "org", "io", "dev", "app", "co", "ai", "me",
-    "gg", "cc", "cv", "xyz",
+    "so", "gg", "cc", "cv", "xyz",
 ];
 
-fn rdap_url(name: &str, tld: &str) -> String {
+fn rdap_url(name: &str, tld: &str) -> Option<String> {
     match tld {
-        "com"      => format!("https://rdap.verisign.com/com/v1/domain/{}.{}", name, tld),
-        "net"      => format!("https://rdap.verisign.com/net/v1/domain/{}.{}", name, tld),
-        "org"      => format!("https://rdap.publicinterestregistry.org/rdap/domain/{}.{}", name, tld),
-        "io"       => format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld),
-        "dev"      => format!("https://pubapi.registry.google/rdap/domain/{}.{}", name, tld),
-        "app"      => format!("https://pubapi.registry.google/rdap/domain/{}.{}", name, tld),
-        "ai"       => format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld),
-        "me"       => format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld),
-        "cc"       => format!("https://tld-rdap.verisign.com/cc/v1/domain/{}.{}", name, tld),
-        "xyz"      => format!("https://rdap.centralnic.com/xyz/domain/{}.{}", name, tld),
-        "cv"       => format!("https://rdap.nic.cv/domain/{}.{}", name, tld),
-        _          => format!("https://rdap.org/domain/{}.{}", name, tld),
+        "com"      => Some(format!("https://rdap.verisign.com/com/v1/domain/{}.{}", name, tld)),
+        "net"      => Some(format!("https://rdap.verisign.com/net/v1/domain/{}.{}", name, tld)),
+        "org"      => Some(format!("https://rdap.publicinterestregistry.org/rdap/domain/{}.{}", name, tld)),
+        "io"       => Some(format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld)),
+        "dev"      => Some(format!("https://pubapi.registry.google/rdap/domain/{}.{}", name, tld)),
+        "app"      => Some(format!("https://pubapi.registry.google/rdap/domain/{}.{}", name, tld)),
+        "ai"       => Some(format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld)),
+        "me"       => Some(format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld)),
+        "cc"       => Some(format!("https://tld-rdap.verisign.com/cc/v1/domain/{}.{}", name, tld)),
+        "xyz"      => Some(format!("https://rdap.centralnic.com/xyz/domain/{}.{}", name, tld)),
+        "cv"       => Some(format!("https://rdap.nic.cv/domain/{}.{}", name, tld)),
+        "gg"       => None, // rdap.gg returns HTML — use WHOIS only
+        _          => Some(format!("https://rdap.org/domain/{}.{}", name, tld)),
     }
 }
 
@@ -117,12 +119,22 @@ async fn dns_check(name: &str, tld: &str) -> Availability {
 }
 
 async fn http_query(client: &Client, url: &str) -> Availability {
-    match client.get(url).timeout(Duration::from_secs(5)).send().await {
-        Ok(resp) => match resp.status().as_u16() {
-            404 => Availability::Available,
-            200 => Availability::Taken,
-            _   => Availability::Unknown,
-        },
+    match client.get(url).header("User-Agent", "Mozilla/5.0").header("Accept", "application/json").timeout(Duration::from_secs(5)).send().await {
+        Ok(resp) => {
+            let status = resp.status().as_u16();
+            let body = resp.text().await.unwrap_or_default();
+            match status {
+                200 => Availability::Taken,
+                404 => {
+                    if body.contains("Blocked") || body.contains("blocked") {
+                        Availability::Protected
+                    } else {
+                        Availability::Available
+                    }
+                }
+                _ => Availability::Unknown,
+            }
+        }
         Err(_) => Availability::Unknown,
     }
 }
@@ -130,9 +142,11 @@ async fn http_query(client: &Client, url: &str) -> Availability {
 async fn check_domain(client: Client, name: String, tld: &'static str) -> (String, Availability) {
     let domain = format!("{}.{}", name, tld);
 
-    // run RDAP and WHOIS in parallel
+    // run RDAP, WHOIS, and DNS all in parallel
     let rdap_fut = async {
-        let primary = rdap_url(&name, tld);
+        let Some(primary) = rdap_url(&name, tld) else {
+            return Availability::Unknown;
+        };
         let result = http_query(&client, &primary).await;
         match result {
             Availability::Unknown => {
@@ -144,7 +158,16 @@ async fn check_domain(client: Client, name: String, tld: &'static str) -> (Strin
         }
     };
 
-    let (rdap_result, whois_result) = tokio::join!(rdap_fut, whois_check(&name, tld));
+    let (rdap_result, whois_result, dns_result) = tokio::join!(
+        rdap_fut,
+        whois_check(&name, tld),
+        dns_check(&name, tld)
+    );
+
+    // DNS confirming active = definitely taken, overrides everything
+    if matches!(dns_result, Availability::Taken) {
+        return (domain, Availability::Taken);
+    }
 
     let result = match rdap_result {
         Availability::Unknown => whois_result,
@@ -152,7 +175,7 @@ async fn check_domain(client: Client, name: String, tld: &'static str) -> (Strin
     };
 
     let result = match result {
-        Availability::Unknown => dns_check(&name, tld).await,
+        Availability::Unknown => dns_result,
         other => other,
     };
 
@@ -161,9 +184,10 @@ async fn check_domain(client: Client, name: String, tld: &'static str) -> (Strin
 
 fn print_result(domain: &str, availability: &Availability) {
     match availability {
-        Availability::Available => println!("  {}  {}", "✓".bright_green().bold(), domain.bright_white().bold()),
-        Availability::Taken     => println!("  {}  {}", "✗".truecolor(70, 70, 90), domain.truecolor(60, 60, 80)),
-        Availability::Unknown   => println!("  {}  {}", "?".bright_yellow(), domain.truecolor(100, 100, 80)),
+        Availability::Available  => println!("  {}  {}", "✓".bright_green().bold(), domain.bright_white().bold()),
+        Availability::Protected  => println!("  {}  {}  {}", "★".bright_yellow().bold(), domain.truecolor(60, 60, 80), "brand protected".truecolor(80, 80, 100)),
+        Availability::Taken      => println!("  {}  {}", "✗".truecolor(70, 70, 90), domain.truecolor(60, 60, 80)),
+        Availability::Unknown    => println!("  {}  {}", "?".bright_yellow(), domain.truecolor(100, 100, 80)),
     }
 }
 
@@ -277,9 +301,10 @@ async fn search_and_print(name: &str, tld_list: Vec<&'static str>) {
 
     // sort and print all at once
     results.sort_by_key(|(_, a)| match a {
-        Availability::Available => 0,
-        Availability::Unknown   => 1,
-        Availability::Taken     => 2,
+        Availability::Available  => 0,
+        Availability::Unknown    => 1,
+        Availability::Protected  => 2,
+        Availability::Taken      => 3,
     });
 
     for (domain, av) in &results {
