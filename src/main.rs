@@ -37,7 +37,8 @@ const ALL_TLDS: &[&str] = &[
 
 fn rdap_url(name: &str, tld: &str) -> String {
     match tld {
-        "com" | "net" => format!("https://rdap.verisign.com/com/v1/domain/{}.{}", name, tld),
+        "com" => format!("https://rdap.verisign.com/com/v1/domain/{}.{}", name, tld),
+        "net" => format!("https://rdap.verisign.com/net/v1/domain/{}.{}", name, tld),
         "org"         => format!("https://rdap.publicinterestregistry.org/rdap/domain/{}.{}", name, tld),
         "io"          => format!("https://rdap.nic.io/domain/{}.{}", name, tld),
         "dev"         => format!("https://rdap.nic.google/domain/{}.{}", name, tld),
