@@ -37,35 +37,27 @@ const ALL_TLDS: &[&str] = &[
 
 fn rdap_url(name: &str, tld: &str) -> String {
     match tld {
-        "com" => format!("https://rdap.verisign.com/com/v1/domain/{}.{}", name, tld),
-        "net" => format!("https://rdap.verisign.com/net/v1/domain/{}.{}", name, tld),
-        "org"         => format!("https://rdap.publicinterestregistry.org/rdap/domain/{}.{}", name, tld),
-        "io"          => format!("https://rdap.nic.io/domain/{}.{}", name, tld),
-        "dev"         => format!("https://rdap.nic.google/domain/{}.{}", name, tld),
-        "app"         => format!("https://rdap.nic.google/domain/{}.{}", name, tld),
-        "co"          => format!("https://rdap.nic.co/domain/{}.{}", name, tld),
-        "ai"          => format!("https://rdap.nic.ai/domain/{}.{}", name, tld),
-        "me"          => format!("https://rdap.nic.me/domain/{}.{}", name, tld),
-        "sh"          => format!("https://rdap.nic.sh/domain/{}.{}", name, tld),
-        "gg"          => format!("https://rdap.gg/domain/{}.{}", name, tld),
-        "cc"          => format!("https://rdap.verisign.com/cc/v1/domain/{}.{}", name, tld),
-        "xyz"         => format!("https://rdap.nic.xyz/domain/{}.{}", name, tld),
-        "designer"    => format!("https://rdap.centralnic.com/designer/domain/{}.{}", name, tld),
-        _             => format!("https://rdap.org/domain/{}.{}", name, tld),
+        "com"      => format!("https://rdap.verisign.com/com/v1/domain/{}.{}", name, tld),
+        "net"      => format!("https://rdap.verisign.com/net/v1/domain/{}.{}", name, tld),
+        "org"      => format!("https://rdap.publicinterestregistry.org/rdap/domain/{}.{}", name, tld),
+        "io"       => format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld),
+        "dev"      => format!("https://pubapi.registry.google/rdap/domain/{}.{}", name, tld),
+        "app"      => format!("https://pubapi.registry.google/rdap/domain/{}.{}", name, tld),
+        "ai"       => format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld),
+        "me"       => format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld),
+        "sh"       => format!("https://rdap.identitydigital.services/rdap/domain/{}.{}", name, tld),
+        "cc"       => format!("https://tld-rdap.verisign.com/cc/v1/domain/{}.{}", name, tld),
+        "xyz"      => format!("https://rdap.centralnic.com/xyz/domain/{}.{}", name, tld),
+        "cv"       => format!("https://rdap.nic.cv/domain/{}.{}", name, tld),
+        "designer" => format!("https://rdap.centralnic.com/designer/domain/{}.{}", name, tld),
+        _          => format!("https://rdap.org/domain/{}.{}", name, tld),
     }
 }
 
 fn whois_server(tld: &str) -> Option<&'static str> {
     match tld {
-        "io"       => Some("whois.nic.io"),
-        "dev"      => Some("whois.nic.google"),
-        "app"      => Some("whois.nic.google"),
-        "co"       => Some("whois.nic.co"),
-        "ai"       => Some("whois.nic.ai"),
-        "me"       => Some("whois.nic.me"),
-        "sh"       => Some("whois.nic.sh"),
+        // only list servers confirmed working — dead servers cause 4s timeouts
         "cc"       => Some("whois.nic.cc"),
-        "cv"       => Some("whois.nic.cv"),
         "xyz"      => Some("whois.nic.xyz"),
         "gg"       => Some("whois.gg"),
         "designer" => Some("whois.centralnic.com"),
