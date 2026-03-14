@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -12,7 +15,7 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
-          - os: macos-13
+          - os: macos-latest
             target: x86_64-apple-darwin
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -60,7 +63,7 @@ jobs:
           echo "LINUX_SHA=$LINUX_SHA" >> $GITHUB_ENV
           echo "VERSION=${VERSION#v}" >> $GITHUB_ENV
 
-      - name: Checkout dott repo
+      - name: Checkout homebrew-dott repo
         uses: actions/checkout@v4
         with:
           repository: yodatoshii/homebrew-dott
@@ -107,5 +110,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/dott.rb
-          git commit -m "Update formula to ${{ env.VERSION }}"
+          git commit -m "dott ${{ env.VERSION }}"
           git push
