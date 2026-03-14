@@ -1,9 +1,18 @@
-# dott
+# 🌐 dott
 
 
-A cli to search for domain names, directly from your terminal.
+A cli for searching domain names directly from your terminal.
 
-## install
+## ✨ Features
+Zero Middlemen: Direct connection to WHOIS servers.
+
+Blazing Fast: Written in rust for near-instant results.
+
+Privacy First: No logging, no tracking.
+
+Lightweight: Single binary with zero bloat.
+
+## 🚀 Installation
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/yodatoshii/dott/master/install.sh | sh
