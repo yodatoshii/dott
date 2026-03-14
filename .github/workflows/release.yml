@@ -60,16 +60,17 @@ jobs:
           echo "LINUX_SHA=$LINUX_SHA" >> $GITHUB_ENV
           echo "VERSION=${VERSION#v}" >> $GITHUB_ENV
 
-      - name: Checkout tap repo
+      - name: Checkout dott repo
         uses: actions/checkout@v4
         with:
-          repository: yodatoshii/homebrew-tap
-          token: ${{ secrets.TAP_TOKEN }}
-          path: tap
+          repository: yodatoshii/dott
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: master
+          path: dott
 
       - name: Update formula
         run: |
-          cat > tap/Formula/dott.rb << EOF
+          cat > dott/Formula/dott.rb << EOF
           class Dott < Formula
             desc "Private domain search. No middlemen."
             homepage "https://github.com/yodatoshii/dott"
@@ -102,10 +103,10 @@ jobs:
           EOF
 
       - name: Push formula
-        working-directory: tap
+        working-directory: dott
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/dott.rb
-          git commit -m "dott ${{ env.VERSION }}"
+          git commit -m "Update formula to ${{ env.VERSION }}"
           git push

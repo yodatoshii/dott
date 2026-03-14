@@ -6,7 +6,7 @@ private domain search. no middlemen.
 
 **homebrew**
 ```sh
-brew tap yodatoshii/tap
+brew tap yodatoshii/dott
 brew install dott
 ```
 
