@@ -15,8 +15,16 @@ Lightweight: Single binary with zero bloat.
 
 ## 🚀 Installation
 
+**via curl**
 ```sh
 curl -fsSL https://raw.githubusercontent.com/yodatoshii/dott/master/install.sh | sh
+```
+
+**build from source**
+```sh
+git clone https://github.com/yodatoshii/dott
+cd dott
+cargo install --path .
 ```
 
 ## usage
