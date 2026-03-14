@@ -109,13 +109,24 @@ async fn whois_check(name: &str, tld: &str) -> Availability {
     }
 }
 
-async fn dns_check(name: &str, tld: &str) -> Availability {
-    let domain = format!("{}.{}:80", name, tld);
-    let found = tokio::task::spawn_blocking(move || {
-        use std::net::ToSocketAddrs;
-        domain.to_socket_addrs().is_ok()
-    }).await.unwrap_or(false);
-    if found { Availability::Taken } else { Availability::Unknown }
+async fn dns_check(client: &Client, name: &str, tld: &str) -> Availability {
+    let url = format!("https://cloudflare-dns.com/dns-query?name={}.{}&type=NS", name, tld);
+    let res = client
+        .get(&url)
+        .header("Accept", "application/dns-json")
+        .timeout(Duration::from_secs(4))
+        .send().await;
+    match res {
+        Ok(r) => {
+            let json: serde_json::Value = r.json().await.unwrap_or_default();
+            match json["Status"].as_i64() {
+                Some(0) => Availability::Taken,  // has NS records = registered
+                Some(3) => Availability::Unknown, // NXDOMAIN = not registered
+                _       => Availability::Unknown,
+            }
+        }
+        Err(_) => Availability::Unknown,
+    }
 }
 
 async fn http_query(client: &Client, url: &str) -> Availability {
@@ -161,7 +172,7 @@ async fn check_domain(client: Client, name: String, tld: &'static str) -> (Strin
     let (rdap_result, whois_result, dns_result) = tokio::join!(
         rdap_fut,
         whois_check(&name, tld),
-        dns_check(&name, tld)
+        dns_check(&client, &name, tld)
     );
 
     // DNS confirming active = definitely taken, overrides everything
