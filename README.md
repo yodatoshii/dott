@@ -4,11 +4,18 @@ private domain search. no middlemen.
 
 ## install
 
+**homebrew**
+```sh
+brew tap yodatoshii/tap
+brew install dott
+```
+
+**cargo**
 ```sh
 cargo install --git https://github.com/yodatoshii/dott
 ```
 
-> requires [Rust](https://rustup.rs)
+> cargo requires [Rust](https://rustup.rs)
 
 ## usage
 
