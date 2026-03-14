@@ -26,7 +26,6 @@ struct Cli {
 #[derive(Debug, Clone)]
 enum Availability {
     Available,
-    AvailableDns,
     Taken,
     Unknown,
 }
@@ -124,7 +123,7 @@ async fn dns_check(name: &str, tld: &str) -> Availability {
         use std::net::ToSocketAddrs;
         domain.to_socket_addrs().is_ok()
     }).await.unwrap_or(false);
-    if found { Availability::Taken } else { Availability::AvailableDns }
+    if found { Availability::Taken } else { Availability::Unknown }
 }
 
 async fn http_query(client: &Client, url: &str) -> Availability {
@@ -172,10 +171,9 @@ async fn check_domain(client: Client, name: String, tld: &'static str) -> (Strin
 
 fn print_result(domain: &str, availability: &Availability) {
     match availability {
-        Availability::Available    => println!("  {}  {}", "✓".bright_green().bold(), domain.bright_white().bold()),
-        Availability::AvailableDns => println!("  {}  {}  {}", "✓".bright_green().bold(), domain.bright_white().bold(), "* no dns found".truecolor(80, 80, 100)),
-        Availability::Taken        => println!("  {}  {}", "✗".truecolor(70, 70, 90), domain.truecolor(60, 60, 80)),
-        Availability::Unknown      => println!("  {}  {}", "?".bright_yellow(), domain.truecolor(100, 100, 80)),
+        Availability::Available => println!("  {}  {}", "✓".bright_green().bold(), domain.bright_white().bold()),
+        Availability::Taken     => println!("  {}  {}", "✗".truecolor(70, 70, 90), domain.truecolor(60, 60, 80)),
+        Availability::Unknown   => println!("  {}  {}", "?".bright_yellow(), domain.truecolor(100, 100, 80)),
     }
 }
 
@@ -289,10 +287,9 @@ async fn search_and_print(name: &str, tld_list: Vec<&'static str>) {
 
     // sort and print all at once
     results.sort_by_key(|(_, a)| match a {
-        Availability::Available    => 0,
-        Availability::AvailableDns => 1,
-        Availability::Unknown      => 2,
-        Availability::Taken        => 3,
+        Availability::Available => 0,
+        Availability::Unknown   => 1,
+        Availability::Taken     => 2,
     });
 
     for (domain, av) in &results {
@@ -300,7 +297,7 @@ async fn search_and_print(name: &str, tld_list: Vec<&'static str>) {
     }
 
     let n = results.iter()
-        .filter(|(_, a)| matches!(a, Availability::Available | Availability::AvailableDns))
+        .filter(|(_, a)| matches!(a, Availability::Available))
         .count();
 
     println!();
@@ -331,7 +328,7 @@ async fn main() {
         }).collect();
         let results = join_all(tasks).await;
         let available: Vec<&str> = results.iter()
-            .filter(|(_, a)| matches!(a, Availability::Available | Availability::AvailableDns))
+            .filter(|(_, a)| matches!(a, Availability::Available))
             .map(|(d, _)| d.as_str()).collect();
         if available.is_empty() {
             println!("  {} nothing available\n", "✗".truecolor(80, 80, 100));
@@ -386,7 +383,7 @@ async fn main() {
                 println!(
                     "  {}  {}    {}  {}    {}  {}    {}  {}",
                     "✓".bright_green(),        "available".truecolor(70, 70, 90),
-                    "✓*".bright_green(),       "no dns".truecolor(70, 70, 90),
+                    "?".bright_yellow(),       "unknown".truecolor(70, 70, 90),
                     "✗".truecolor(70, 70, 90), "taken".truecolor(70, 70, 90),
                     "ctrl+c".truecolor(100, 95, 130), "quit".truecolor(70, 70, 90),
                 );
