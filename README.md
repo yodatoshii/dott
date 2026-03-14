@@ -1,6 +1,7 @@
 # dott
 
-private domain search. no middlemen.
+
+A cli to search for domain names, directly from your terminal.
 
 ## install
 
