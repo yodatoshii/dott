@@ -300,9 +300,33 @@ async fn search_and_print(name: &str, tld_list: Vec<&'static str>) {
     println!();
 }
 
+async fn print_update(handle: tokio::task::JoinHandle<Option<String>>) {
+    if let Ok(Some(version)) = handle.await {
+        println!(
+            "  {} {}\n",
+            "update available →".truecolor(100, 95, 130),
+            format!("brew upgrade dott  (v{})", version).bright_white()
+        );
+    }
+}
+
+async fn check_for_update() -> Option<String> {
+    let client = Client::new();
+    let res = client
+        .get("https://api.github.com/repos/yodatoshii/dott/releases/latest")
+        .header("User-Agent", "dott")
+        .timeout(Duration::from_secs(3))
+        .send().await.ok()?;
+    let json: serde_json::Value = res.json().await.ok()?;
+    let latest = json["tag_name"].as_str()?.trim_start_matches('v').to_string();
+    let current = env!("CARGO_PKG_VERSION");
+    if latest != current { Some(latest) } else { None }
+}
+
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    let update_check = tokio::spawn(check_for_update());
 
     // ── one-shot mode ──────────────────────────────────────────
     if let Some(keywords) = cli.suggest {
@@ -327,6 +351,7 @@ async fn main() {
             for d in &available { println!("  {}  {}", "✓".bright_green().bold(), d.bright_white().bold()); }
             println!("\n  {} available\n", available.len().to_string().bright_green().bold());
         }
+        print_update(update_check).await;
         return;
     }
 
@@ -342,6 +367,7 @@ async fn main() {
         };
         println!("  {} {}", "checking:".truecolor(80, 80, 100), name.bright_white());
         search_and_print(&name, tld_list).await;
+        print_update(update_check).await;
         return;
     }
 
@@ -353,6 +379,7 @@ async fn main() {
         match read_input(&prompt) {
             None => {
                 println!("\n  {}\n", "bye 🐱".truecolor(180, 140, 200));
+                print_update(update_check).await;
                 break;
             }
             Some(input) => {
