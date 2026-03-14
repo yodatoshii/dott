@@ -1,5 +1,6 @@
 # 🌐 dott
 
+![dott preview](preview.png)
 
 A cli for searching domain names directly from your terminal.
 
