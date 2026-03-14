@@ -387,6 +387,7 @@ async fn main() {
                 if input.is_empty() { continue; }
                 if input == "exit" || input == "quit" || input == "q" {
                     println!("\n  {}\n", "bye 🐱".truecolor(180, 140, 200));
+                    print_update(update_check).await;
                     break;
                 }
                 // strip TLD if included
