@@ -192,7 +192,7 @@ fn print_cat() {
     println!("{}", "  |  _ \\  ___| |_| |_".truecolor(255, 60, 90));
     println!("{}", "  | | | |/ _ \\ __| __|".truecolor(180, 50, 230));
     println!("{}", "  | |_| | (_) | |_| |_".truecolor(80, 130, 255));
-    println!("{}", "  |____/ \\___/ \\__|\\__|  v1.0".truecolor(50, 215, 235));
+    println!("{}", format!("  |____/ \\___/ \\__|\\__|  v{}", env!("CARGO_PKG_VERSION")).truecolor(50, 215, 235));
     println!();
     println!("{}", "  private domain search..".truecolor(80, 80, 110));
     println!("{}", "  type a name and hit enter. esc to quit.".truecolor(110, 105, 140));
