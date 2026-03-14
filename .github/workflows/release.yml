@@ -63,14 +63,13 @@ jobs:
       - name: Checkout dott repo
         uses: actions/checkout@v4
         with:
-          repository: yodatoshii/dott
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ref: master
-          path: dott
+          repository: yodatoshii/homebrew-dott
+          token: ${{ secrets.TAP_TOKEN }}
+          path: tap
 
       - name: Update formula
         run: |
-          cat > dott/Formula/dott.rb << EOF
+          cat > tap/Formula/dott.rb << EOF
           class Dott < Formula
             desc "Private domain search. No middlemen."
             homepage "https://github.com/yodatoshii/dott"
@@ -103,7 +102,7 @@ jobs:
           EOF
 
       - name: Push formula
-        working-directory: dott
+        working-directory: tap
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
