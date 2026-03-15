@@ -27,7 +27,7 @@ cd dott
 cargo install --path .
 ```
 
-## usage
+## 💻 usage
 
 **interactive mode**
 ```sh
@@ -49,7 +49,7 @@ dott myname --tlds com,io,dev
 dott --suggest my keywords
 ```
 
-## using with LLMs
+## 🤖 using with LLMs
 
 dott has a `--plain` flag that outputs clean, no-color text — easy for LLMs to read and act on.
 
