@@ -2,16 +2,21 @@
 
 ![dott preview](preview.png)
 
-A cli for searching domain names directly from your terminal.
+# 📋 Project Overview
 
-## ✨ Features
-Zero Middlemen: Direct connection to WHOIS servers.
+dott is a lightweight domain name search CLI with these features:
 
-Blazing Fast: Written in rust for near-instant results.
+## ✨ Direct WHOIS connections (no middlemen)
+## ⚡ Written in Rust (fast performance)
+## 🔒 Privacy-focused (no logging/tracking)
+## 📦 Single binary deployment
 
-Privacy First: No logging, no tracking.
+# 📚 Features Available
 
-Lightweight: Single binary with zero bloat.
+- Interactive mode: dott - launches an interactive search
+- Direct lookup: dott myname - check different extensions
+- Suggestions: dott --suggest my keywords - get name ideas
+
 
 ## 🚀 Installation
 
