@@ -3,7 +3,7 @@
 ![dott preview](preview.png)
 
 
-⚡ Project Overview
+# ⚡ Project Overview
 
 dott is a lightweight domain name search CLI with these features:
 
