@@ -1,0 +1,34 @@
+# dott
+
+CLI tool to check domain name availability. Direct WHOIS/RDAP lookups — no middlemen, no logging.
+
+## commands
+
+Check a name across all TLDs:
+$ dott myname --plain
+
+Check specific TLDs:
+$ dott myname --tlds com,io,dev --plain
+
+Suggest names from keywords:
+$ dott --suggest keyword --plain
+
+## output format
+
+One domain per line: `<domain> <status>`
+
+Status values: available, taken, protected, unknown
+
+Example:
+myname.com taken
+myname.io available
+myname.dev available
+myname.co available
+
+## notes
+
+- Always use --plain for machine-readable output
+- Use --tlds to narrow results and reduce output size
+- Use --suggest when the user wants name ideas from a keyword
+- protected = domain exists but is brand-protected
+- unknown = could not determine (treat as inconclusive)
