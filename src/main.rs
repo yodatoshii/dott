@@ -11,7 +11,8 @@ use reqwest::Client;
 use std::{io::{self, Write}, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
+use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "dott", about = "private domain search. no middlemen.")]
@@ -21,6 +22,8 @@ struct Cli {
     tlds: Option<String>,
     #[arg(short, long, num_args = 1..)]
     suggest: Option<Vec<String>>,
+    #[arg(long)]
+    plain: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -129,7 +132,8 @@ async fn dns_check(client: &Client, name: &str, tld: &str) -> Availability {
     }
 }
 
-async fn http_query(client: &Client, url: &str) -> Availability {
+async fn http_query(client: &Client, url: &str, sem: &Semaphore) -> Availability {
+    let _permit = sem.acquire().await.unwrap();
     match client.get(url).header("User-Agent", "Mozilla/5.0").header("Accept", "application/json").timeout(Duration::from_secs(5)).send().await {
         Ok(resp) => {
             let status = resp.status().as_u16();
@@ -150,7 +154,7 @@ async fn http_query(client: &Client, url: &str) -> Availability {
     }
 }
 
-async fn check_domain(client: Client, name: String, tld: &'static str) -> (String, Availability) {
+async fn check_domain(client: Client, name: String, tld: &'static str, sem: Arc<Semaphore>) -> (String, Availability) {
     let domain = format!("{}.{}", name, tld);
 
     // run RDAP, WHOIS, and DNS all in parallel
@@ -158,11 +162,11 @@ async fn check_domain(client: Client, name: String, tld: &'static str) -> (Strin
         let Some(primary) = rdap_url(&name, tld) else {
             return Availability::Unknown;
         };
-        let result = http_query(&client, &primary).await;
+        let result = http_query(&client, &primary, &sem).await;
         match result {
             Availability::Unknown => {
                 let fallback = format!("https://rdap.org/domain/{}.{}", name, tld);
-                if fallback != primary { http_query(&client, &fallback).await }
+                if fallback != primary { http_query(&client, &fallback, &sem).await }
                 else { Availability::Unknown }
             }
             other => other,
@@ -282,19 +286,21 @@ fn read_input(prompt: &str) -> Option<String> {
     result
 }
 
-async fn search_and_print(name: &str, tld_list: Vec<&'static str>) {
+async fn search_and_print(name: &str, tld_list: Vec<&'static str>, plain: bool) {
     println!();
     let total = tld_list.len();
     let (tx, mut rx) = mpsc::unbounded_channel::<(String, Availability)>();
     let client = Client::new();
+    let sem = Arc::new(Semaphore::new(10));
 
     // spawn all checks, each sends result as soon as it's done
     for tld in tld_list {
         let tx     = tx.clone();
         let client = client.clone();
         let name   = name.to_string();
+        let sem    = sem.clone();
         tokio::spawn(async move {
-            let result = check_domain(client, name, tld).await;
+            let result = check_domain(client, name, tld, sem).await;
             let _ = tx.send(result);
         });
     }
@@ -317,6 +323,19 @@ async fn search_and_print(name: &str, tld_list: Vec<&'static str>) {
         Availability::Protected  => 2,
         Availability::Taken      => 3,
     });
+
+    if plain {
+        for (domain, av) in &results {
+            let status = match av {
+                Availability::Available => "available",
+                Availability::Taken     => "taken",
+                Availability::Protected => "protected",
+                Availability::Unknown   => "unknown",
+            };
+            println!("{} {}", domain, status);
+        }
+        return;
+    }
 
     for (domain, av) in &results {
         print_result(domain, av);
@@ -372,15 +391,26 @@ async fn main() {
         let suggestions = generate_suggestions(&keywords);
         let tlds: Vec<&'static str> = vec!["com", "io", "dev", "app", "co"];
         let client = Client::new();
+        let sem = Arc::new(Semaphore::new(10));
         let tasks: Vec<_> = suggestions.iter().flat_map(|name| {
-            let name = name.clone(); let client = client.clone();
-            tlds.iter().map(move |tld| check_domain(client.clone(), name.clone(), tld))
+            let name = name.clone(); let client = client.clone(); let sem = sem.clone();
+            tlds.iter().map(move |tld| check_domain(client.clone(), name.clone(), tld, sem.clone()))
         }).collect();
         let results = join_all(tasks).await;
         let available: Vec<&str> = results.iter()
             .filter(|(_, a)| matches!(a, Availability::Available))
             .map(|(d, _)| d.as_str()).collect();
-        if available.is_empty() {
+        if cli.plain {
+            for (domain, av) in &results {
+                let status = match av {
+                    Availability::Available => "available",
+                    Availability::Taken     => "taken",
+                    Availability::Protected => "protected",
+                    Availability::Unknown   => "unknown",
+                };
+                println!("{} {}", domain, status);
+            }
+        } else if available.is_empty() {
             println!("  {} nothing available\n", "✗".truecolor(80, 80, 100));
         } else {
             for d in &available { println!("  {}  {}", "✓".bright_green().bold(), d.bright_white().bold()); }
@@ -400,8 +430,8 @@ async fn main() {
         } else {
             ALL_TLDS.to_vec()
         };
-        println!("  {} {}", "checking:".truecolor(80, 80, 100), name.bright_white());
-        search_and_print(&name, tld_list).await;
+        if !cli.plain { println!("  {} {}", "checking:".truecolor(80, 80, 100), name.bright_white()); }
+        search_and_print(&name, tld_list, cli.plain).await;
         print_update(update_check).await;
         return;
     }
@@ -432,7 +462,7 @@ async fn main() {
                     input
                 };
                 println!("  {} {}", "checking:".truecolor(80, 80, 100), name.bright_white());
-                search_and_print(&name, ALL_TLDS.to_vec()).await;
+                search_and_print(&name, ALL_TLDS.to_vec(), false).await;
                 println!("{}", "  ─────────────────────────────────────────────────────".truecolor(38, 36, 52));
                 println!(
                     "  {}  {}    {}  {}    {}  {}    {}  {}",

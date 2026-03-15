@@ -48,3 +48,22 @@ dott myname --tlds com,io,dev
 ```sh
 dott --suggest my keywords
 ```
+
+## using with LLMs
+
+dott has a `--plain` flag that outputs clean, no-color text — easy for LLMs to read and act on.
+
+```sh
+dott myname --plain
+dott myname --tlds com,io,dev --plain
+dott --suggest my keywords --plain
+```
+
+output:
+```
+myname.com available
+myname.io taken
+myname.dev available
+```
+
+LLMs can use dott as a tool to check availability while handling the creative/naming side themselves. pass `--plain` so the output is token-efficient and easy to parse.
