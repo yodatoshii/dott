@@ -2,14 +2,14 @@
 
 ![dott preview](preview.png)
 
-# 📋 Project Overview
 
-dott is a lightweight domain name search CLI with these features:
 
-## ✨ Direct WHOIS connections (no middlemen)
-## ⚡ Written in Rust (fast performance)
-## 🔒 Privacy-focused (no logging/tracking)
-## 📦 Single binary deployment
+## dott is a lightweight domain name search CLI with these features:
+
+- ✨ Direct WHOIS connections (no middlemen)
+- ⚡ Written in Rust (fast performance)
+- 🔒 Privacy-focused (no logging/tracking)
+- 📦 Single binary deployment
 
 # 📚 Features Available
 
