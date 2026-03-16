@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-REPO="yodatoshii/dott"
+REPO="yodatoshicom/dott"
 BIN="dott"
 INSTALL_DIR="/usr/local/bin"
 

@@ -57,7 +57,7 @@ jobs:
       - name: Download release assets
         run: |
           VERSION=${GITHUB_REF_NAME}
-          BASE="https://github.com/yodatoshii/dott/releases/download/${VERSION}"
+          BASE="https://github.com/yodatoshicom/dott/releases/download/${VERSION}"
 
           curl -sL "${BASE}/dott-aarch64-apple-darwin.tar.gz" -o arm.tar.gz
           curl -sL "${BASE}/dott-x86_64-apple-darwin.tar.gz" -o intel.tar.gz
@@ -75,7 +75,7 @@ jobs:
       - name: Checkout homebrew-dott repo
         uses: actions/checkout@v4
         with:
-          repository: yodatoshii/homebrew-dott
+          repository: yodatoshicom/homebrew-dott
           token: ${{ secrets.TAP_TOKEN }}
           path: tap
 
@@ -84,22 +84,22 @@ jobs:
           cat > tap/Formula/dott.rb << EOF
           class Dott < Formula
             desc "Private domain search. No middlemen."
-            homepage "https://github.com/yodatoshii/dott"
+            homepage "https://github.com/yodatoshicom/dott"
             version "${{ env.VERSION }}"
 
             on_macos do
               on_arm do
-                url "https://github.com/yodatoshii/dott/releases/download/v${{ env.VERSION }}/dott-aarch64-apple-darwin.tar.gz"
+                url "https://github.com/yodatoshicom/dott/releases/download/v${{ env.VERSION }}/dott-aarch64-apple-darwin.tar.gz"
                 sha256 "${{ env.ARM_SHA }}"
               end
               on_intel do
-                url "https://github.com/yodatoshii/dott/releases/download/v${{ env.VERSION }}/dott-x86_64-apple-darwin.tar.gz"
+                url "https://github.com/yodatoshicom/dott/releases/download/v${{ env.VERSION }}/dott-x86_64-apple-darwin.tar.gz"
                 sha256 "${{ env.INTEL_SHA }}"
               end
             end
 
             on_linux do
-              url "https://github.com/yodatoshii/dott/releases/download/v${{ env.VERSION }}/dott-x86_64-unknown-linux-gnu.tar.gz"
+              url "https://github.com/yodatoshicom/dott/releases/download/v${{ env.VERSION }}/dott-x86_64-unknown-linux-gnu.tar.gz"
               sha256 "${{ env.LINUX_SHA }}"
             end
 
