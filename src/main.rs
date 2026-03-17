@@ -8,7 +8,7 @@ use crossterm::{
 };
 use futures::future::join_all;
 use reqwest::Client;
-use std::{io::{self, Write}, time::Duration};
+use std::{io::{self, Write}, sync::atomic::{AtomicBool, Ordering}, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Semaphore};
@@ -26,18 +26,51 @@ struct Cli {
     plain: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+struct DomainDates {
+    registered: Option<String>,
+    updated:    Option<String>,
+    expires:    Option<String>,
+}
+
 #[derive(Debug, Clone)]
 enum Availability {
     Available,
     Protected,
-    Taken,
+    Taken(DomainDates),
     Unknown,
+}
+
+// find the first YYYY-MM-DD pattern in a string
+fn parse_date(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    for i in 0..b.len().saturating_sub(9) {
+        if b[i..i+4].iter().all(|c| c.is_ascii_digit())
+            && b[i+4] == b'-'
+            && b[i+5..i+7].iter().all(|c| c.is_ascii_digit())
+            && b[i+7] == b'-'
+            && b[i+8..i+10].iter().all(|c| c.is_ascii_digit())
+        {
+            return Some(s[i..i+10].to_string());
+        }
+    }
+    None
 }
 
 const ALL_TLDS: &[&str] = &[
     "com", "net", "org", "io", "dev", "app", "co", "ai", "me",
     "so", "gg", "cc", "cv", "xyz",
 ];
+
+fn tld_rank(domain: &str) -> u8 {
+    let tld = domain.rsplit('.').next().unwrap_or("");
+    match tld {
+        "com" => 0, "io"  => 1, "dev" => 2, "ai"  => 3,
+        "app" => 4, "co"  => 5, "net" => 6, "org" => 7,
+        "me"  => 8, "so"  => 9, "gg"  => 10, "cc" => 11,
+        "xyz" => 12, "cv" => 13, _ => 99,
+    }
+}
 
 fn rdap_url(name: &str, tld: &str) -> Option<String> {
     match tld {
@@ -60,12 +93,17 @@ fn rdap_url(name: &str, tld: &str) -> Option<String> {
 fn whois_server(tld: &str) -> Option<&'static str> {
     match tld {
         // only list servers confirmed working — dead servers cause 4s timeouts
-        "cc"       => Some("whois.nic.cc"),
-        "xyz"      => Some("whois.nic.xyz"),
-        "gg"       => Some("whois.gg"),
         "com"      => Some("whois.verisign-grs.com"),
         "net"      => Some("whois.verisign-grs.com"),
         "org"      => Some("whois.pir.org"),
+        "io"       => Some("whois.nic.io"),
+        "co"       => Some("whois.registry.co"),
+        "ai"       => Some("whois.nic.ai"),
+        "me"       => Some("whois.nic.me"),
+        "so"       => Some("whois.nic.so"),
+        "cc"       => Some("whois.nic.cc"),
+        "xyz"      => Some("whois.nic.xyz"),
+        "gg"       => Some("whois.gg"),
         _          => None,
     }
 }
@@ -78,13 +116,28 @@ async fn whois_check(name: &str, tld: &str) -> Availability {
     let addr  = format!("{}:43", server);
     let query = format!("{}.{}\r\n", name, tld);
 
+    // some registries (e.g. whois.registry.co) are slow to accept — give them more time
+    let connect_secs = match server {
+        "whois.registry.co" => 8,
+        _ => 4,
+    };
+
     let mut stream = match tokio::time::timeout(
-        Duration::from_secs(4),
+        Duration::from_secs(connect_secs),
         TcpStream::connect(&addr),
     ).await {
         Ok(Ok(s)) => s,
         _         => return Availability::Unknown,
     };
+
+    // CentralNic (whois.registry.co) sends a banner on connect — drain it before querying
+    if server == "whois.registry.co" {
+        let mut banner = vec![0u8; 512];
+        let _ = tokio::time::timeout(
+            Duration::from_millis(300),
+            stream.read(&mut banner),
+        ).await;
+    }
 
     if stream.write_all(query.as_bytes()).await.is_err() {
         return Availability::Unknown;
@@ -92,7 +145,7 @@ async fn whois_check(name: &str, tld: &str) -> Availability {
 
     let mut response = String::new();
     let _ = tokio::time::timeout(
-        Duration::from_secs(4),
+        Duration::from_secs(8),
         stream.read_to_string(&mut response),
     ).await;
 
@@ -106,7 +159,17 @@ async fn whois_check(name: &str, tld: &str) -> Availability {
     {
         Availability::Available
     } else if lower.contains("domain name:") || lower.contains("domain:") {
-        Availability::Taken
+        let extract = |keyword: &str| -> Option<String> {
+            response.lines()
+                .find(|l| l.to_lowercase().contains(keyword))
+                .and_then(|l| l.find(':').map(|i| &l[i+1..]))
+                .and_then(|s| parse_date(s.trim()))
+        };
+        Availability::Taken(DomainDates {
+            registered: extract("creat").or_else(|| extract("registered:")),
+            updated:    extract("updat").or_else(|| extract("last modified").or_else(|| extract("changed:"))),
+            expires:    extract("expir").or_else(|| extract("paid-till")).or_else(|| extract("renewal")),
+        })
     } else {
         Availability::Unknown
     }
@@ -123,7 +186,7 @@ async fn dns_check(client: &Client, name: &str, tld: &str) -> Availability {
         Ok(r) => {
             let json: serde_json::Value = r.json().await.unwrap_or_default();
             match json["Status"].as_i64() {
-                Some(0) => Availability::Taken,  // has NS records = registered
+                Some(0) => Availability::Taken(DomainDates::default()),  // has NS records = registered
                 Some(3) => Availability::Unknown, // NXDOMAIN = not registered
                 _       => Availability::Unknown,
             }
@@ -139,7 +202,32 @@ async fn http_query(client: &Client, url: &str, sem: &Semaphore) -> Availability
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();
             match status {
-                200 => Availability::Taken,
+                200 => {
+                    let dates = serde_json::from_str::<serde_json::Value>(&body).ok()
+                        .and_then(|j| j["events"].as_array().cloned())
+                        .map(|events| {
+                            let find = |keyword: &str| -> Option<String> {
+                                events.iter()
+                                    .find(|e| e["eventAction"].as_str()
+                                        .map(|a| a == keyword)
+                                        .unwrap_or(false))
+                                    .and_then(|e| e["eventDate"].as_str())
+                                    .and_then(|d| parse_date(d))
+                            };
+                            DomainDates {
+                                registered: find("registration"),
+                                updated:    find("last changed"),
+                                expires:    events.iter()
+                                    .find(|e| e["eventAction"].as_str()
+                                        .map(|a| a.contains("expir"))
+                                        .unwrap_or(false))
+                                    .and_then(|e| e["eventDate"].as_str())
+                                    .and_then(|d| parse_date(d)),
+                            }
+                        })
+                        .unwrap_or_default();
+                    Availability::Taken(dates)
+                }
                 404 => {
                     if body.contains("Blocked") || body.contains("blocked") {
                         Availability::Protected
@@ -179,14 +267,31 @@ async fn check_domain(client: Client, name: String, tld: &'static str, sem: Arc<
         dns_check(&client, &name, tld)
     );
 
-    // DNS confirming active = definitely taken, overrides everything
-    if matches!(dns_result, Availability::Taken) {
-        return (domain, Availability::Taken);
+    // merge two DomainDates, preferring non-None fields
+    let merge_dates = |a: DomainDates, b: DomainDates| -> DomainDates {
+        DomainDates {
+            registered: a.registered.or(b.registered),
+            updated:    a.updated.or(b.updated),
+            expires:    a.expires.or(b.expires),
+        }
+    };
+
+    // DNS confirming active = definitely taken; merge dates from RDAP + WHOIS
+    if matches!(dns_result, Availability::Taken(_)) {
+        let dates = match (rdap_result, whois_result) {
+            (Availability::Taken(a), Availability::Taken(b)) => merge_dates(a, b),
+            (Availability::Taken(a), _) => a,
+            (_, Availability::Taken(b)) => b,
+            _ => DomainDates::default(),
+        };
+        return (domain, Availability::Taken(dates));
     }
 
-    let result = match rdap_result {
-        Availability::Unknown => whois_result,
-        other => other,
+    // merge RDAP and WHOIS dates when both are Taken
+    let result = match (rdap_result, whois_result) {
+        (Availability::Unknown, whois)                      => whois,
+        (Availability::Taken(a), Availability::Taken(b))   => Availability::Taken(merge_dates(a, b)),
+        (rdap, _)                                           => rdap,
     };
 
     let result = match result {
@@ -197,18 +302,56 @@ async fn check_domain(client: Client, name: String, tld: &'static str, sem: Arc<
     (domain, result)
 }
 
-fn print_result(domain: &str, availability: &Availability) {
+fn date_to_epoch_days(y: i64, m: i64, d: i64) -> i64 {
+    let a = (14 - m) / 12;
+    let y2 = y + 4800 - a;
+    let m2 = m + 12 * a - 3;
+    let jdn = d + (153 * m2 + 2) / 5 + 365 * y2 + y2 / 4 - y2 / 100 + y2 / 400 - 32045;
+    jdn - 2440588
+}
+
+fn days_until(date_str: &str) -> Option<i64> {
+    let p: Vec<i64> = date_str.splitn(3, '-')
+        .map(|s| s.parse().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let target = date_to_epoch_days(p[0], p[1], p[2]);
+    let today = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64 / 86400;
+    Some(target - today)
+}
+
+fn print_result(domain: &str, availability: &Availability, pad: usize) {
+    let padded = format!("{:<width$}", domain, width = pad);
     match availability {
-        Availability::Available  => println!("  {}  {}", "✓".bright_green().bold(), domain.bright_white().bold()),
-        Availability::Protected  => println!("  {}  {}  {}", "★".bright_yellow().bold(), domain.truecolor(60, 60, 80), "brand protected".truecolor(80, 80, 100)),
-        Availability::Taken      => println!("  {}  {}", "✗".truecolor(70, 70, 90), domain.truecolor(60, 60, 80)),
-        Availability::Unknown    => println!("  {}  {}", "?".bright_yellow(), domain.truecolor(100, 100, 80)),
+        Availability::Available   => println!("  {}  {}", "✓".bright_green().bold(), padded.bright_white().bold()),
+        Availability::Protected   => println!("  {}  {}  {}", "★".bright_yellow().bold(), padded.truecolor(60, 60, 80), "brand protected".truecolor(80, 80, 100)),
+        Availability::Unknown     => println!("  {}  {}", "?".bright_yellow(), padded.truecolor(100, 100, 80)),
+        Availability::Taken(dates) => {
+            let mut info = String::new();
+            if let Some(ref d) = dates.registered { info.push_str(&format!("  reg {}", d)); }
+            if let Some(ref d) = dates.updated    { info.push_str(&format!("  upd {}", d)); }
+            let exp_str = dates.expires.as_ref().map(|d| {
+                let label = format!("  exp {}", d);
+                match days_until(d) {
+                    Some(n) if n < 90  => label.truecolor(220, 100, 60).to_string(),
+                    Some(n) if n < 365 => label.truecolor(200, 170, 60).to_string(),
+                    _                  => label.truecolor(110, 100, 150).to_string(),
+                }
+            });
+            let meta = info.truecolor(110, 100, 150).to_string()
+                + exp_str.as_deref().unwrap_or("");
+            if dates.registered.is_none() && dates.updated.is_none() && dates.expires.is_none() {
+                println!("  {}  {}", "✗".truecolor(70, 70, 90), padded.truecolor(60, 60, 80));
+            } else {
+                println!("  {}  {}{}", "✗".truecolor(70, 70, 90), padded.truecolor(60, 60, 80), meta);
+            }
+        }
     }
 }
 
 fn generate_suggestions(keywords: &[String]) -> Vec<String> {
     let prefixes = ["get", "try", "use", "go", "my", "the", "run", "hey"];
-    let suffixes = ["hq", "app", "cli", "lab", "hub", "kit", "base", "dot"];
+    let suffixes = ["hq", "app", "lab", "hub", "base"];
     let mut names = Vec::new();
     for kw in keywords {
         names.push(kw.clone());
@@ -287,7 +430,6 @@ fn read_input(prompt: &str) -> Option<String> {
 }
 
 async fn search_and_print(name: &str, tld_list: Vec<&'static str>, plain: bool) {
-    println!();
     let total = tld_list.len();
     let (tx, mut rx) = mpsc::unbounded_channel::<(String, Availability)>();
     let client = Client::new();
@@ -306,6 +448,28 @@ async fn search_and_print(name: &str, tld_list: Vec<&'static str>, plain: bool) 
     }
     drop(tx);
 
+    // spinner
+    let spinning = Arc::new(AtomicBool::new(true));
+    let spinner_handle = if !plain {
+        print!("\n");
+        io::stdout().flush().unwrap();
+        let spinning = spinning.clone();
+        Some(tokio::spawn(async move {
+            let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let mut i = 0usize;
+            while spinning.load(Ordering::Relaxed) {
+                print!("\r  {}", frames[i % frames.len()].truecolor(160, 120, 220));
+                io::stdout().flush().unwrap();
+                i += 1;
+                tokio::time::sleep(Duration::from_millis(80)).await;
+            }
+            print!("\r");
+            execute!(io::stdout(), Clear(ClearType::CurrentLine)).unwrap();
+        }))
+    } else {
+        None
+    };
+
     let mut received = 0;
     let mut results: Vec<(String, Availability)> = Vec::new();
 
@@ -316,19 +480,33 @@ async fn search_and_print(name: &str, tld_list: Vec<&'static str>, plain: bool) 
         }
     }
 
+    // stop spinner and wait for it to clear before printing results
+    if let Some(handle) = spinner_handle {
+        spinning.store(false, Ordering::Relaxed);
+        let _ = handle.await;
+    }
+
     // sort and print all at once
-    results.sort_by_key(|(_, a)| match a {
-        Availability::Available  => 0,
-        Availability::Unknown    => 1,
-        Availability::Protected  => 2,
-        Availability::Taken      => 3,
+    results.sort_by(|(da, aa), (db, ab)| {
+        let is_com_a = da.ends_with(".com");
+        let is_com_b = db.ends_with(".com");
+        if is_com_a != is_com_b {
+            return is_com_b.cmp(&is_com_a);
+        }
+        let status_rank = |a: &Availability| match a {
+            Availability::Available  => 0u8,
+            Availability::Unknown    => 1,
+            Availability::Protected  => 2,
+            Availability::Taken(_)   => 3,
+        };
+        (status_rank(aa), tld_rank(da)).cmp(&(status_rank(ab), tld_rank(db)))
     });
 
     if plain {
         for (domain, av) in &results {
             let status = match av {
                 Availability::Available => "available",
-                Availability::Taken     => "taken",
+                Availability::Taken(_)  => "taken",
                 Availability::Protected => "protected",
                 Availability::Unknown   => "unknown",
             };
@@ -337,8 +515,9 @@ async fn search_and_print(name: &str, tld_list: Vec<&'static str>, plain: bool) 
         return;
     }
 
+    let pad = results.iter().map(|(d, _)| d.len()).max().unwrap_or(0);
     for (domain, av) in &results {
-        print_result(domain, av);
+        print_result(domain, av, pad);
     }
 
     let n = results.iter()
@@ -404,7 +583,7 @@ async fn main() {
             for (domain, av) in &results {
                 let status = match av {
                     Availability::Available => "available",
-                    Availability::Taken     => "taken",
+                    Availability::Taken(_)  => "taken",
                     Availability::Protected => "protected",
                     Availability::Unknown   => "unknown",
                 };
@@ -439,6 +618,8 @@ async fn main() {
     // ── interactive mode ───────────────────────────────────────
     print_cat();
 
+    let mut last_name: Option<String> = None;
+
     loop {
         let prompt = format!("  {} ", "›".bright_magenta().bold());
         match read_input(&prompt) {
@@ -455,6 +636,48 @@ async fn main() {
                     print_update(update_check).await;
                     break;
                 }
+
+                // 's' → suggest for last searched name
+                if input == "s" {
+                    if let Some(ref name) = last_name {
+                        println!("  {} {}", "suggesting for:".truecolor(80, 80, 100), name.bright_white());
+                        let suggestions = generate_suggestions(&[name.clone()]);
+                        let tlds: Vec<&'static str> = vec!["com", "io", "dev", "app", "co"];
+                        let client = Client::new();
+                        let sem = Arc::new(Semaphore::new(10));
+                        let tasks: Vec<_> = suggestions.iter().flat_map(|n| {
+                            let n = n.clone();
+                            let client = client.clone();
+                            let sem = sem.clone();
+                            tlds.iter().map(move |tld| check_domain(client.clone(), n.clone(), tld, sem.clone()))
+                        }).collect();
+                        let mut results = join_all(tasks).await;
+                        results.sort_by_key(|(_, a)| match a {
+                            Availability::Available => 0,
+                            Availability::Unknown   => 1,
+                            Availability::Protected => 2,
+                            Availability::Taken(_)  => 3,
+                        });
+                        let available: Vec<&str> = results.iter()
+                            .filter(|(_, a)| matches!(a, Availability::Available))
+                            .map(|(d, _)| d.as_str())
+                            .collect();
+                        println!();
+                        if available.is_empty() {
+                            println!("  {}  nothing available\n", "✗".truecolor(80, 80, 100));
+                        } else {
+                            for d in &available {
+                                println!("  {}  {}", "✓".bright_green().bold(), d.bright_white().bold());
+                            }
+                            println!();
+                            println!("  {} available\n", available.len().to_string().bright_green().bold());
+                        }
+                    } else {
+                        println!("  {}\n", "search for a name first".truecolor(100, 100, 120));
+                    }
+                    continue;
+                }
+
                 // strip TLD if included
                 let name = if let Some(dot) = input.find('.') {
                     input[..dot].to_string()
@@ -463,13 +686,16 @@ async fn main() {
                 };
                 println!("  {} {}", "checking:".truecolor(80, 80, 100), name.bright_white());
                 search_and_print(&name, ALL_TLDS.to_vec(), false).await;
+                last_name = Some(name);
+
                 println!("{}", "  ─────────────────────────────────────────────────────".truecolor(38, 36, 52));
                 println!(
-                    "  {}  {}    {}  {}    {}  {}    {}  {}",
+                    "  {}  {}    {}  {}    {}  {}    {}  {}    {}  {}",
                     "✓".bright_green(),        "available".truecolor(70, 70, 90),
                     "?".bright_yellow(),       "unknown".truecolor(70, 70, 90),
                     "✗".truecolor(70, 70, 90), "taken".truecolor(70, 70, 90),
-                    "ctrl+c".truecolor(100, 95, 130), "quit".truecolor(70, 70, 90),
+                    "s".truecolor(160, 120, 220),      "suggest".truecolor(70, 70, 90),
+                    "ctrl+c".truecolor(100, 95, 130),  "quit".truecolor(70, 70, 90),
                 );
                 println!("{}", "  ─────────────────────────────────────────────────────".truecolor(38, 36, 52));
             }
