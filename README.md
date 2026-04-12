@@ -2,7 +2,7 @@
 
 ## About
 
-Domain search tool for the terminal. Checks availability across 14 TLDs by querying RDAP, WHOIS, and DNS directly from your machine. No API keys, no middlemen, no tracking.
+Domain search tool for the terminal. Checks availability across 14 TLDs by querying RDAP, WHOIS, and DNS directly from your machine.
 
 ## Install
 
