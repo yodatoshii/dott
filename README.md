@@ -17,7 +17,8 @@ curl -fsSL https://raw.githubusercontent.com/yodatoshicom/dott/master/install.sh
 
 Or build from source:
 ```sh
-cargo install dott
+git clone https://github.com/yodatoshicom/dott
+cd dott && cargo install --path .
 ```
 
 ## Usage
