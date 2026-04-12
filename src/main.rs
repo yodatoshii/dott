@@ -15,7 +15,7 @@ use tokio::sync::{mpsc, Semaphore};
 use std::sync::Arc;
 
 #[derive(Parser)]
-#[command(name = "dott", about = "private domain search. no middlemen.")]
+#[command(name = "dott", version, about = "private domain search. no middlemen.")]
 struct Cli {
     name: Option<String>,
     #[arg(short, long)]
@@ -546,14 +546,18 @@ async fn print_update(handle: tokio::task::JoinHandle<Option<String>>) {
 async fn check_for_update() -> Option<String> {
     let client = Client::new();
     let res = client
-        .get("https://api.github.com/repos/yodatoshii/dott/releases/latest")
+        .get("https://api.github.com/repos/yodatoshicom/dott/releases/latest")
         .header("User-Agent", "dott")
         .timeout(Duration::from_secs(3))
         .send().await.ok()?;
     let json: serde_json::Value = res.json().await.ok()?;
     let latest = json["tag_name"].as_str()?.trim_start_matches('v').to_string();
     let current = env!("CARGO_PKG_VERSION");
-    if latest != current { Some(latest) } else { None }
+    let parse_ver = |s: &str| -> Option<(u32, u32, u32)> {
+        let mut parts = s.split('.');
+        Some((parts.next()?.parse().ok()?, parts.next()?.parse().ok()?, parts.next()?.parse().ok()?))
+    };
+    if parse_ver(&latest)? > parse_ver(current)? { Some(latest) } else { None }
 }
 
 #[tokio::main]

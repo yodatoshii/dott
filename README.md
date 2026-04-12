@@ -1,69 +1,80 @@
-# 🌐 dott
+# dott
+
+Private domain availability checker. Queries RDAP, WHOIS, and DNS directly from your machine — no middlemen, no tracking, no API keys.
 
 ![dott preview](preview.png)
 
-A cli for searching domain names directly from your terminal.
+## Install
 
-## ✨ Features
-Zero Middlemen: Direct connection to WHOIS servers.
+**Homebrew**
+```sh
+brew install yodatoshicom/dott/dott
+```
 
-Blazing Fast: Written in rust for near-instant results.
-
-Privacy First: No logging, no tracking.
-
-Lightweight: Single binary with zero bloat.
-
-## 🚀 Installation
-
-**via curl**
+**curl**
 ```sh
 curl -fsSL https://raw.githubusercontent.com/yodatoshicom/dott/master/install.sh | sh
 ```
 
-**build from source**
+**Cargo**
 ```sh
-git clone https://github.com/yodatoshicom/dott
-cd dott
-cargo install --path .
+cargo install dott
 ```
 
-## 💻 usage
+**From source**
+```sh
+git clone https://github.com/yodatoshicom/dott
+cd dott && cargo install --path .
+```
 
-**interactive mode**
+## Usage
+
+**Interactive mode** — just type names, get results:
 ```sh
 dott
 ```
 
-**check a name**
+**Check a name across all TLDs:**
 ```sh
 dott myname
 ```
 
-**check specific TLDs**
+**Check specific TLDs:**
 ```sh
 dott myname --tlds com,io,dev
 ```
 
-**suggest names from keywords**
+**Suggest names from keywords:**
 ```sh
-dott --suggest my keywords
+dott --suggest cool project
 ```
 
-## 🤖 using with LLMs
-
-dott has a `--plain` flag that outputs clean, no-color text — easy for LLMs to read and act on.
-
+**Machine-readable output** (for scripts and LLMs):
 ```sh
 dott myname --plain
-dott myname --tlds com,io,dev --plain
-dott --suggest my keywords --plain
 ```
-
-output:
 ```
-myname.com available
-myname.io taken
+myname.com taken
+myname.io available
 myname.dev available
 ```
 
-LLMs can use dott as a tool to check availability while handling the creative/naming side themselves. pass `--plain` so the output is token-efficient and easy to parse.
+## How it works
+
+For each domain, three checks run in parallel:
+
+| Source | Method | What it tells you |
+|--------|--------|-------------------|
+| **RDAP** | HTTPS to registry | Status + registration/expiry dates |
+| **WHOIS** | TCP port 43 | Status + registration/expiry dates |
+| **DNS** | Cloudflare DoH | Whether NS records exist (definitely registered) |
+
+Results are merged with DNS > RDAP > WHOIS priority. Dates are pulled from whichever source has them. Expiring domains are color-highlighted (< 90 days = orange, < 1 year = yellow).
+
+## Supported TLDs
+
+com, net, org, io, dev, app, co, ai, me, so, gg, cc, cv, xyz
+
+## License
+
+[MIT](LICENSE)
