@@ -1,75 +1,46 @@
-# dott
+![dott](preview.png)
 
-Private domain availability checker. Queries RDAP, WHOIS, and DNS directly from your machine — no middlemen, no tracking, no API keys.
+## About
 
-![dott preview](preview.png)
+Domain search tool for the terminal. Checks availability across 14 TLDs by querying RDAP, WHOIS, and DNS directly from your machine. No API keys, no middlemen, no tracking.
 
 ## Install
 
-**Homebrew**
 ```sh
 brew install yodatoshicom/dott/dott
 ```
 
-**curl**
+Or with curl:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/yodatoshicom/dott/master/install.sh | sh
 ```
 
-**Cargo**
+Or build from source:
 ```sh
 cargo install dott
 ```
 
-**From source**
-```sh
-git clone https://github.com/yodatoshicom/dott
-cd dott && cargo install --path .
-```
-
 ## Usage
 
-**Interactive mode** — just type names, get results:
 ```sh
-dott
-```
-
-**Check a name across all TLDs:**
-```sh
-dott myname
-```
-
-**Check specific TLDs:**
-```sh
-dott myname --tlds com,io,dev
-```
-
-**Suggest names from keywords:**
-```sh
-dott --suggest cool project
-```
-
-**Machine-readable output** (for scripts and LLMs):
-```sh
-dott myname --plain
-```
-```
-myname.com taken
-myname.io available
-myname.dev available
+dott              # interactive mode
+dott myname       # check a name
+dott myname -t com,io,dev   # specific TLDs
+dott -s cool project        # suggest names from keywords
+dott myname --plain         # machine-readable output
 ```
 
 ## How it works
 
-For each domain, three checks run in parallel:
+Three checks run in parallel for each domain:
 
 | Source | Method | What it tells you |
 |--------|--------|-------------------|
 | **RDAP** | HTTPS to registry | Status + registration/expiry dates |
 | **WHOIS** | TCP port 43 | Status + registration/expiry dates |
-| **DNS** | Cloudflare DoH | Whether NS records exist (definitely registered) |
+| **DNS** | Cloudflare DoH | Whether NS records exist |
 
-Results are merged with DNS > RDAP > WHOIS priority. Dates are pulled from whichever source has them. Expiring domains are color-highlighted (< 90 days = orange, < 1 year = yellow).
+Results are merged (DNS > RDAP > WHOIS priority). Expiring domains are highlighted — orange under 90 days, yellow under a year.
 
 ## Supported TLDs
 
