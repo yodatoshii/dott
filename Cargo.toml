@@ -1,6 +1,6 @@
 [package]
 name = "dott"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2024"
 description = "Private domain availability checker. RDAP, WHOIS, and DNS — no middlemen, no tracking."
 license = "MIT"

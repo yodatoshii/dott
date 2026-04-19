@@ -318,6 +318,41 @@ fn merge_results(rdap: Availability, whois: Availability, dns: Availability) -> 
     }
 }
 
+// 60s in-session cache, keyed on (name, tld). Avoids re-fetching when interactive searches overlap
+// (e.g. typing `foo` then `foo+` would otherwise re-query foo.com/io/dev/app/co).
+type Cache = Arc<std::sync::Mutex<std::collections::HashMap<(String, &'static str), (std::time::Instant, Availability)>>>;
+
+const CACHE_TTL: Duration = Duration::from_secs(60);
+
+fn new_cache() -> Cache {
+    Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+async fn check_domain_cached(
+    client: Client,
+    name: String,
+    tld: &'static str,
+    sem: Arc<Semaphore>,
+    cache: Option<Cache>,
+) -> (String, Availability) {
+    if let Some(ref c) = cache {
+        if let Ok(map) = c.lock() {
+            if let Some((t, av)) = map.get(&(name.clone(), tld)) {
+                if t.elapsed() < CACHE_TTL {
+                    return (format!("{}.{}", name, tld), av.clone());
+                }
+            }
+        }
+    }
+    let (domain, av) = check_domain(client, name.clone(), tld, sem).await;
+    if let Some(ref c) = cache {
+        if let Ok(mut map) = c.lock() {
+            map.insert((name, tld), (std::time::Instant::now(), av.clone()));
+        }
+    }
+    (domain, av)
+}
+
 async fn check_domain(client: Client, name: String, tld: &'static str, sem: Arc<Semaphore>) -> (String, Availability) {
     let domain = format!("{}.{}", name, tld);
 
@@ -472,31 +507,26 @@ fn read_input(prompt: &str) -> Option<String> {
     enable_raw_mode().unwrap();
 
     let result = loop {
-        if event::poll(Duration::from_millis(100)).unwrap() {
-            if let Event::Key(key) = event::read().unwrap() {
-                match key.code {
-                    KeyCode::Esc => { break None; }
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        break None;
-                    }
-                    KeyCode::Enter => {
-                        println!();
-                        break Some(buf.clone());
-                    }
-                    KeyCode::Backspace => {
-                        if !buf.is_empty() {
-                            buf.pop();
-                            execute!(io::stdout(), cursor::MoveLeft(1), Clear(ClearType::UntilNewLine)).unwrap();
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        buf.push(c);
-                        print!("{}", c);
-                        io::stdout().flush().unwrap();
-                    }
-                    _ => {}
+        let Ok(Event::Key(key)) = event::read() else { continue };
+        match key.code {
+            KeyCode::Esc => break None,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break None,
+            KeyCode::Enter => {
+                println!();
+                break Some(buf.clone());
+            }
+            KeyCode::Backspace => {
+                if !buf.is_empty() {
+                    buf.pop();
+                    execute!(io::stdout(), cursor::MoveLeft(1), Clear(ClearType::UntilNewLine)).unwrap();
                 }
             }
+            KeyCode::Char(c) => {
+                buf.push(c);
+                print!("{}", c);
+                io::stdout().flush().unwrap();
+            }
+            _ => {}
         }
     };
 
@@ -504,11 +534,10 @@ fn read_input(prompt: &str) -> Option<String> {
     result
 }
 
-async fn search_and_print(name: &str, tld_list: Vec<&'static str>, plain: bool) {
-    let client = Client::new();
+async fn search_and_print(client: &Client, name: &str, tld_list: Vec<&'static str>, plain: bool, cache: Option<&Cache>) {
     let sem = Arc::new(Semaphore::new(10));
     let tasks: Vec<_> = tld_list.iter().map(|tld| {
-        check_domain(client.clone(), name.to_string(), tld, sem.clone())
+        check_domain_cached(client.clone(), name.to_string(), tld, sem.clone(), cache.cloned())
     }).collect();
 
     // spinner
@@ -648,7 +677,7 @@ fn install_launch_agent() {
     }
 }
 
-async fn cmd_watch(domain: &str) {
+async fn cmd_watch(client: &Client, domain: &str) {
     if !domain.contains('.') {
         println!("\n  {} please specify a full domain, e.g. {}\n", "!".bright_yellow(), format!("dott --watch {}.com", domain).bright_white());
         return;
@@ -666,7 +695,7 @@ async fn cmd_watch(domain: &str) {
     let tld_str = if parts.len() == 2 { parts[0] } else { "com" };
     let name_str = if parts.len() == 2 { parts[1] } else { domain.as_str() };
     let tld: &'static str = ALL_TLDS.iter().find(|&&t| t == tld_str).copied().unwrap_or("com");
-    let (_, status) = check_domain(Client::new(), name_str.to_string(), tld, Arc::new(Semaphore::new(1))).await;
+    let (_, status) = check_domain(client.clone(), name_str.to_string(), tld, Arc::new(Semaphore::new(1))).await;
     let status_str = status.as_str().to_string();
 
     entries.push(WatchEntry { domain: domain.clone(), last_status: status_str.clone() });
@@ -725,10 +754,9 @@ fn cmd_watching_list() {
     println!();
 }
 
-async fn cmd_background_check() {
+async fn cmd_background_check(client: &Client) {
     let mut entries = load_watchlist();
     if entries.is_empty() { return; }
-    let client = Client::new();
     let sem = Arc::new(Semaphore::new(5));
     let domains: Vec<(String, &'static str)> = entries.iter().map(|e| {
         let parts: Vec<&str> = e.domain.rsplitn(2, '.').collect();
@@ -755,8 +783,7 @@ async fn cmd_background_check() {
     if changed { save_watchlist(&entries); }
 }
 
-async fn check_for_update() -> Option<String> {
-    let client = Client::new();
+async fn check_for_update(client: Client) -> Option<String> {
     let res = client
         .get("https://api.github.com/repos/yodatoshicom/dott/releases/latest")
         .header("User-Agent", "dott")
@@ -775,9 +802,10 @@ async fn check_for_update() -> Option<String> {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    let client = Client::new();
 
-    if cli.background_check { cmd_background_check().await; return; }
-    if let Some(ref domain) = cli.watch    { cmd_watch(domain).await; return; }
+    if cli.background_check { cmd_background_check(&client).await; return; }
+    if let Some(ref domain) = cli.watch    { cmd_watch(&client, domain).await; return; }
     if let Some(ref domain) = cli.unwatch  { cmd_unwatch(domain).await; return; }
     if cli.watching { cmd_watching_list(); return; }
 
@@ -801,12 +829,12 @@ async fn main() {
             } else {
                 (line.to_string(), default_tlds.clone())
             };
-            search_and_print(&name, tlds, true).await;
+            search_and_print(&client, &name, tlds, true, None).await;
         }
         return;
     }
 
-    let update_check = tokio::spawn(check_for_update());
+    let update_check = tokio::spawn(check_for_update(client.clone()));
 
     // ── one-shot mode ──────────────────────────────────────────
     if let Some(keywords) = cli.suggest {
@@ -816,7 +844,6 @@ async fn main() {
         println!("  {} {}\n", "generating for:".truecolor(80, 80, 100), keywords.join(", ").bright_white());
         let suggestions = generate_suggestions(&keywords);
         let tlds: Vec<&'static str> = vec!["com", "io", "dev", "app", "co"];
-        let client = Client::new();
         let sem = Arc::new(Semaphore::new(10));
         let tasks: Vec<_> = suggestions.iter().flat_map(|name| {
             let name = name.clone(); let client = client.clone(); let sem = sem.clone();
@@ -851,7 +878,7 @@ async fn main() {
             ALL_TLDS.to_vec()
         };
         if !cli.plain { println!("  {} {}", "checking:".truecolor(80, 80, 100), name.bright_white()); }
-        search_and_print(&name, tld_list, cli.plain).await;
+        search_and_print(&client, &name, tld_list, cli.plain, None).await;
         print_update(update_check).await;
         return;
     }
@@ -859,6 +886,7 @@ async fn main() {
     // ── interactive mode ───────────────────────────────────────
     print_cat();
 
+    let cache = new_cache();
     let mut last_name: Option<String> = None;
 
     loop {
@@ -896,13 +924,13 @@ async fn main() {
                     println!("  {} {}", "suggesting for:".truecolor(80, 80, 100), name.bright_white());
                     let suggestions = generate_suggestions(&[name.clone()]);
                     let tlds: Vec<&'static str> = vec!["com", "io", "dev", "app", "co"];
-                    let client = Client::new();
                     let sem = Arc::new(Semaphore::new(10));
                     let tasks: Vec<_> = suggestions.iter().flat_map(|n| {
                         let n = n.clone();
                         let client = client.clone();
                         let sem = sem.clone();
-                        tlds.iter().map(move |tld| check_domain(client.clone(), n.clone(), tld, sem.clone()))
+                        let cache = cache.clone();
+                        tlds.iter().map(move |tld| check_domain_cached(client.clone(), n.clone(), tld, sem.clone(), Some(cache.clone())))
                     }).collect();
                     let results = join_all(tasks).await;
                     let available: Vec<&str> = results.iter()
@@ -924,7 +952,7 @@ async fn main() {
 
                 // /watch <domain>, /unwatch <domain>, /list
                 if let Some(domain) = input.strip_prefix("/watch ") {
-                    cmd_watch(domain.trim()).await;
+                    cmd_watch(&client, domain.trim()).await;
                     continue;
                 }
                 if let Some(domain) = input.strip_prefix("/unwatch ") {
@@ -947,7 +975,7 @@ async fn main() {
                     input
                 };
                 println!("  {} {}", "checking:".truecolor(80, 80, 100), name.bright_white());
-                search_and_print(&name, ALL_TLDS.to_vec(), false).await;
+                search_and_print(&client, &name, ALL_TLDS.to_vec(), false, Some(&cache)).await;
                 last_name = Some(name);
 
                 println!();
