@@ -611,12 +611,23 @@ async fn search_and_print(client: &Client, name: &str, tld_list: Vec<&'static st
     println!();
 }
 
+fn installed_via_brew() -> bool {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let path = exe.to_string_lossy();
+    path.contains("/Cellar/") || path.contains("/homebrew/") || path.contains("/linuxbrew/")
+}
+
 async fn print_update(handle: tokio::task::JoinHandle<Option<String>>) {
     if let Ok(Some(version)) = handle.await {
+        let hint = if installed_via_brew() {
+            format!("brew upgrade dott  (v{})", version)
+        } else {
+            format!("github.com/yodatoshicom/dott/releases  (v{})", version)
+        };
         println!(
             "  {} {}\n",
             "update available →".truecolor(100, 95, 130),
-            format!("brew upgrade dott  (v{})", version).bright_white()
+            hint.bright_white()
         );
     }
 }
